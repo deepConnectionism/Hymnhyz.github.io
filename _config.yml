@@ -2,7 +2,7 @@
 title: 岁寒
 subtitle: 疾风知劲草，岁寒见后凋。
 welcome_message: <a href="https://github.com/Hymnhyz/Hymnhyz.github.io" target="_blank">Download the theme</a>
-description: 个人博客.
+description: 个人博客。
 creator: <a href="http://onev.cat">@onevcat</a>
 
 url: "https://hymnhyz.github.io/#blog"
@@ -37,9 +37,9 @@ comment:
     
 # Social
 social:
-    weibo: onevcat
+    weibo: 
     github: Hymnhyz
-    twitter: onevcat
+    twitter: 
     gplus: 107108267983477358170
     mail: yz.hu@foxmail.com
 
