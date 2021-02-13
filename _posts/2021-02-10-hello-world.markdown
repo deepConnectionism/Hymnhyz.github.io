@@ -11,8 +11,6 @@ date: 2021-02-13 13:44:24.000000000 +09:00
 - 收集并发布了**ReSyncED**，这是一个真实世界的lip-Sync Evaluation数据集，用于在完全没看过的野生视频上对lip-sync模型的性能进行基准测试。
 - Wav2Lip是第一个独立于说话者的模型，可以生成与真实同步视频匹配的lip-sync精度的视频。人类的评估表明，在90%以上的情况下，Wav2Lip生成的视频优于现有的方法和未同步的版本。
 
-![wav2lip网络的输入输出](/assets/images/wav2lip输入输出.jpg "wav2lip输入输出")
-
 <center>
     <img style="border-radius: 0.3125em;
     box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
