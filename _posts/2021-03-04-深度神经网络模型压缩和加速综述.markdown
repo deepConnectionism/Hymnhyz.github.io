@@ -1,0 +1,149 @@
+时间：2017年10月23日
+
+深度网络中执行模型压缩和加速而不会显着降低模型性能。 在过去的五年中，该领域取得了巨大的进步。 在本文中，我们回顾了压缩和加速DNN模型的最新技术。 通常，这些技术分为四类：
+- 参数修剪和量化
+- 低秩分解
+- 转移/紧凑卷积滤波器
+- 知识蒸馏。 
+  
+首先介绍参数修剪和量化的方法，然后介绍其他技术。 对于每个类别，我们还提供有关性能，相关应用程序，优缺点的深入分析。 然后，我们介绍一些最近成功的方法，例如动态容量网络和随机深度网络。 之后，我们调查了评估矩阵，用于评估模型性能和最近基准工作的主要数据集。 最后，我们总结了本文，讨论了仍然存在的挑战以及未来工作的可能方向。
+## 1. 引言
+Krizhevskyet等人的工作[<sup>[1]</sup>](#refer-anchor-1)在2012年ImageNet挑战赛中取得了突破性的成果，该网络使用了一个包含6000万个参数的网络，该参数具有五个卷积层和三个全连接层。 通常，使用NVIDIA K40机器在ImagetNet数据集上训练整个模型需要2-3天的时间。 
+
+另一个例子是使用包含卷积层，locally-connected层和全连接层的混合[<sup>[2]</sup>](#refer-anchor-2)[<sup>[3]</sup>](#refer-anchor-3)，通过包含数亿参数的网络获得了the Labeled Faces in the Wild (LFW) dataset数据集上的top验证结果。训练这种模型以获得合理的性能也是非常耗时的。在仅依赖于全连接层的体系结构中，参数的数量可以增长到数十亿[<sup>[4]</sup>](#refer-anchor-4)。
+
+具有50个卷积层的ResNet-50[<sup>[5]</sup>](#refer-anchor-5)在处理图像时需要超过95MB的存储空间和38亿个浮点数乘法。 丢弃一些冗余权重后，网络仍可以照常工作，但可以节省超过75％的参数和50％的计算时间。 对于像手机和只有几兆字节资源的FPGA这样的设备，如何压缩其上使用的模型也很重要。
+
+为了实现这些目标，需要许多学科的联合解决方案，包括但不限于机器学习，优化，计算机体系结构，信号处理和硬件设计。
+
+基于它们的性质，我们将这些方法分为四类：
+- 参数修剪和量化
+- 低秩分解
+- 转移/紧凑卷积滤波器
+- 知识蒸馏。 
+  
+基于参数修剪和量化的方法探索了模型参数中的冗余，并尝试去除了冗余和非关键的参数。
+
+基于低秩分解的技术使用矩阵/张量分解来估计DNN的信息参数。 
+
+基于转移/紧凑型卷积滤波器的方法设计了特殊结构的卷积滤波器，以减少参数空间并节省存储/计算量。 
+
+基于知识蒸馏的方法学习蒸馏模型并训练更紧凑的神经网络以重现较大网络的输出。
+
+表 I 模型压缩和加速的不同方法概述。
+| 分类名称 | 描述 | 应用 | 更多细节 |
+| ------- | ------ | ------ | ------ |
+| 参数剪枝和量化 | 减少对性能不敏感的冗余参数 | 卷积层和全连接层 | 对各种设置具有鲁棒性，可以实现良好的性能，可以支持从头开始训练和预训练模型 |
+| 低秩分解 | 使用矩阵/张量分解估计信息性参数  | 卷积层和全连接层 | 易于实施的标准化管道可以支持从头开始训练和预训练模型  |
+| 转移/紧凑型卷积滤波器 | 设计特殊的结构卷积滤波器以保存参数 | 只有卷积层 | 算法取决于应用，通常可以获得良好的性能，仅从头开始支持训练   |
+| 知识蒸馏 | 利用大型模型的精炼知识训练紧凑型神经网络 | 卷积层和全连接层 | 模型性能对应用和网络结构很敏感，仅支持从头开始训练 |
+
+参数修剪和量化，低秩分解和知识蒸馏方法可以部署在具有完全连接的层和卷积层的DNN模型中，从而实现可比的性能。使用转移/紧凑型卷积滤波器的方法仅设计用于卷积层。 低阶分解和基于转移/压缩过滤器的方法提供了一条端到端的流水线，并且可以在CPU / GPU环境中轻松实现。 参数修剪和量化使用不同的策略（例如二进制编码和稀疏约束）来执行任务。
+
+关于训练协议，基于参数修剪/量化和低秩分解的模型可以从预先训练的模型中提取或从头开始训练，而转移/紧凑的过滤器和知识蒸馏模型仅支持从头开始训练。 这些方法大多数是独立设计的，并且彼此互补。 例如，转移的层和参数修剪与量化可以一起部署。 另一个例子是，可以将模型量化和二值化与低秩近似一起使用，以实现进一步的压缩/加速。 我们将在下面的部分中分别描述其属性的详细信息以及优缺点的分析。
+
+## 2. 参数剪枝和量化
+早期工作表明，对网络进行修剪和量化可有效降低网络复杂性并解决过度拟合问题[<sup>[6]</sup>](#refer-anchor-6)。 在发现修剪可以使神经网络的正则化并因此提高泛化能力之后，人们对其压缩DNN进行了广泛的研究。这些技术可以进一步映射为三个子类别：量化和二值化，网络修剪和结构矩阵。
+### A.量化和二值化
+网络量化通过减少表示每个权重所需的位数来压缩原始网络。Gonget等人[<sup>[6]</sup>](#refer-anchor-6)和吴等人[<sup>[7]</sup>](#refer-anchor-7)利用k均值对参数值进行标量量化。Vanhouckeet等人[<sup>[8]</sup>](#refer-anchor-8)表明，对参数进行8位量化可以显着提高速度，同时精度损失极小。 文献[<sup>[9]</sup>](#refer-anchor-9)中的工作在基于随机舍入的CNN训练中使用了16位定点表示，这大大减少了内存使用和浮点运算，而损失的分类精度却很小。
+
+在[<sup>[10]</sup>](#refer-anchor-10)中提出的三阶段压缩方法：修剪，量化和霍夫曼编码。 输入是原始模型，输出是压缩模型。
+
+<center>
+    <img style="border-radius: 0.3125em;
+    box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
+    src="/assets/images/[10]中提出的三阶段压缩方法.png">
+    <br>
+    <div style="color:orange; border-bottom: 1px solid #d9d9d9;
+    display: inline-block;
+    color: #999;
+    padding: 2px;"> 图.1 <sup>[10]</sup>中提出的三阶段压缩方法:剪枝，量化和huffman编码。输入是原始模型，输出是压缩后的模型。</div>
+</center>
+
+文献[<sup>[10]</sup>](#refer-anchor-10)中提出的方法使用权重共享对连接权重进行量化，然后将霍夫曼编码应用于量化后的权重以及码本(codebook)，以进一步降低速率。如图1所示，它首先通过正常的网络训练来学习连通性，然后修剪较小的权重连接。最后，对网络进行了重新训练，以学习剩下的稀疏连接的最终权重。这项工作在所有基于量化的方法中都达到了最先进的性能。在[<sup>[11]</sup>](#refer-anchor-11)中，证明了可以使用Hessian权重来衡量网络参数的重要性，并提出了将聚类参数的平均Hessian加权量化误差最小化的方法。量化是一种非常有效的模型压缩和加速方法。
+
+在每个权重的1比特表示的极端情况下，即二进制权重神经网络。主要思想是在模型训练期间直接学习二进制权重或激活。 有一些直接使用二进制权重训练CNN的著作，例如BinaryConnect [<sup>[12]</sup>](#refer-anchor-12)，BinaryNet[<sup>[13]</sup>](#refer-anchor-13)和XNOR[<sup>[14]</sup>](#refer-anchor-141)。 文献[<sup>[15]</sup>](#refer-anchor-15)中的系统研究表明，经过反向传播训练的网络可以复原特定的权重失真，包括二进制权重。
+
+### **讨论**
+
+当处理诸如GoogleNet之类的大型CNN时，二进制网络的准确性会大大降低。此类二进制网络的另一个缺点是，现有的二进制化方案基于简单的矩阵近似，而忽略了二进制化对精度损失的影响。为了解决这个问题，[<sup>[16]</sup>](#refer-anchor-16)中的工作提出了一种具有对角Hessian近似的近似牛顿算法，该算法直接降低了二进制权重的损失。[<sup>[17]</sup>](#refer-anchor-17)中的工作通过随机权重二值化并将隐藏状态计算中的乘法转换为显着变化，从而减少了训练阶段浮点乘法的时间。Zhao等[<sup>[18]</sup>](#refer-anchor-18)提出半波高斯量化(half-waveGaussian Quantization)来学习低精度网络，并获得令人满意的结果。
+
+### B.网络剪枝
+修剪的一种早期方法是“偏重衰变”(the Biased Weight Decay)[<sup>[19]</sup>](#refer-anchor-19)。最佳脑损伤(The Optimal Brain Damage)[<sup>[20]</sup>](#refer-anchor-20)和最佳脑外科医生(the Optimal BrainSurgeon )[<sup>[21]</sup>](#refer-anchor-21)方法基于损失函数的Hessian减少了连接数。他们的工作表明，这种修剪比基于幅度的修剪（例如权重衰减方法）具有更高的准确性。
+
+朝这个方向发展的趋势是在预训练的DNN模型中修剪多余的，非信息量的权重。例如，Srinivas和Babu[<sup>[22]</sup>](#refer-anchor-22)探索了神经元中的冗余，并提出了一种无数据的修剪方法来去除冗余神经元。Han等人[<sup>[23]</sup>](#refer-anchor-23)建议减少整个网络中的参数和操作总数。Chen等人[<sup>[24]</sup>](#refer-anchor-24)提出了一种HashedNets模型，该模型使用低成本的哈希函数将权重分组到哈希桶中以进行参数共享。 文献[<sup>[10]</sup>](#refer-anchor-10)中的深度压缩方法去除了冗余连接并量化了权重，然后使用霍夫曼编码对量化后的权重进行编码。在[<sup>[25]</sup>](#refer-anchor-25)中，提出了一种基于软权重共享的简单正则化方法，该方法包括在一个简单的（重新）训练过程中同时进行量化和修剪。以上修剪方案通常会在DNN中产生连接修剪。
+
+对训练具有稀疏约束的紧凑型DNN的兴趣也越来越高。这些稀疏性约束通常在优化问题
+l$_{0}$或l$_{1}$正则化器中引入。文献[<sup>[26]</sup>](#refer-anchor-26)中的工作在卷积滤波器上施加了组稀疏约束，以实现结构化脑损伤，即以组方式修剪卷积内核的条目。 在[<sup>[27]</sup>](#refer-anchor-27)中，在训练阶段引入了一组稀疏的正则化神经元，以学习具有减少的过滤器的紧凑型CNN。Wen等[<sup>[28]</sup>](#refer-anchor-28)在每层上添加了结构化的稀疏性正则化器，以减少不重要的filter，通道甚至层。在filter-level修剪中，以上所有工作都使用了l$_{1}$或l$_{2}$范数规范器。[<sup>[29]</sup>](#refer-anchor-29)中的工作使用了l$_{1}$范数来选择和修剪不重要的过滤器。
+
+### **讨论**
+使用网络修剪存在一些问题。首先，与常规方法相比，使用l$_{1}$或l$_{2}$正则化进行修剪需要更多的迭代收敛时间。 此外，所有修剪标准都需要手动设置layers的灵敏度，这需要对参数进行微调，并且对于某些应用程序可能比较麻烦。最后，网络修剪通常能够减小模型大小，但不能提高效率（训练或推理时间）。
+
+### C.设计结构矩阵
+在包含fully-connected layers的体系结构中，至关重要的是探索fully-connected  layers中的参数冗余，这通常是内存消耗方面的瓶颈。 这些网络层使用非线性变换$\mathcal{f}$(x,M)=$\sigma$(Mx)，其中$\sigma(\cdot)$是element-wise的非线性算子，x是输入向量，M是$\mathcal{m\times n}$的参数矩阵[<sup>[30]</sup>](#refer-anchor-30)。当M是一个大的一般稠密矩阵时，存储$\mathcal{mn}$参数和计算矩阵向量乘积的花费在$\mathcal{O(mn)}$时间内。因此，修剪参数的直观方法是将迫使x为参数化的结构矩阵。一个$\mathcal{mn}$矩阵可以使用比称为结构化矩阵的参数少得多的参数来描述。通常，该结构不仅应减少存储成本，还应通过快速的矩阵向量乘法和梯度计算显著地加快推理和训练阶段。
+遵循这个方向，[<sup>[31]</sup>](#refer-anchor-31)，[<sup>[32]</sup>](#refer-anchor-32)中的工作提出了一种基于循环预测(circulant projections)的简单有效的方法，同时保持了竞争性错误率。给定一个向量$\mathcal{r=(r_{0},r_{1},\cdots,r_{d-1})}$ ，循环矩阵$\mathcal{{\Bbb R}\in \Bbb R^{d\times d}}$定义为：
+$$
+\begin{pmatrix}
+r_0&r_{d-1}&\cdots&r_2&r_1\\
+r_1&r_0&r_{d-1}&    &r_2\\
+\vdots&r_1&r_0&\ddots&\vdots\\
+r_{d-2}&&\ddots&\ddots&r_{d-1}\\
+r_{d-1}&r_{d-2}&\cdots&r_1&r_0\\    
+\end{pmatrix}
+\tag{1}
+$$
+因此内存成本变为$\mathcal{O(d)}$而不是$\mathcal{O(d^2)}$。这样的循环结构还可以使用快速傅里叶变换（FFT）来加快计算速度。给定一个d-维向量**r**，上述等式(1)中的1层循环神经网络具有$\mathcal{O(dlogd)}$的时间复杂度。
+
+在[<sup>[33]</sup>](#refer-anchor-33)中，引入了一种新的自适应快餐变换(Adaptive Fastfood transform)来重新参数化fully connected layers的矩阵向量乘法。定义了Adaptive Fastfood transform matrix $\mathcal{{\Bbb R}\in \Bbb R^{n\times d}}$为：
+$$\mathbf{R=SHGΠHB} \tag{2}$$
+其中**S**，**G**和**B**是随机对角矩阵。$Π∈\{0,1\}^{d\times d}$是一个随机置换矩阵，而H表示Walsh-Hadamard矩阵。使用Adaptive Fastfood变换重新参数化具有 d 输入和 n 输出的全连接层，分别减少了存储和计算成本，从$\mathcal{O(nd)}$到$\mathcal{O(n)}$和从$\mathcal{O(nd)}$到$\mathcal{O(nlogd)}$。
+
+文献[<sup>[30]</sup>](#refer-anchor-30)中的工作表明了简约的新概念在结构化矩阵理论中的有效性。他们提出的方法可以扩展到各种其他结构化矩阵类，包括与多维卷积有关[<sup>[35]</sup>](#refer-anchor-35)的块和multi-level Toeplitz-like矩阵[<sup>[34]</sup>](#refer-anchor-34)。遵循这一思想，[<sup>[36]</sup>](#refer-anchor-36)提出了一种通用的结构化有效线性层 用于CNN。
+
+**缺点:** 这种方法的一个问题是结构约束通常会损害性能，因为该约束可能会给模型带来偏差。另一方面，如何找到合适的结构矩阵是困难的。没有理论上的方法可以得出它。
+
+## 3.低秩近似和稀疏性
+卷积运算在深度DNN中占大多数计算的大部分，因此减少卷积层将提高压缩率以及整体速度。 卷积核可以看作是3D 张量。基于张量分解的思想是基于3D张量中存在结构空间的直觉而得出的。对于全连接层，可以将其视为2D矩阵（或3D张量），低秩也可以帮助实现。
+
+使用低秩filters来加速卷积已经很长时间了，例如，高维DCT（离散余弦变换）和使用张量积的小波系统分别由一维DCT变换和一维小波构造而成。Rigamontiet等人[<sup>[37]</sup>](#refer-anchor-37)使用字典学习方法引入了学习可分离的一维滤波器。对于一些简单的DNN模型，在[<sup>[38]</sup>](#refer-anchor-38)中提出了卷积核的一些低秩逼近和聚类方案。他们为单个卷积层实现了2倍的加速，而分类精度下降了1％。[<sup>[39]</sup>](#refer-anchor-39)中的工作提出使用不同的张量分解方案，报告了4.5倍的加速，文本识别的准确性下降了1％。
+
+低秩逼近是逐层完成的。完成后固定一层的参数，并根据重建误差准则对上面的层进行微调。 这些是压缩3D卷积层的典型低秩方法，在图2中进行了描述。按照这个方向，[40]中的核张量提出了规范多态（CP）分解。 他们使用非线性最小二乘法来计算CP分解。[41]提出了一种新的计算低秩张量分解的算法，从零开始训练低秩约束的CNN。 它使用批处理规范化（BN）来转换内部隐藏单元的激活。 通常，[41]中的CP和BN分解方案（BNLow-rank）均可用于从头开始训练CNN。 但是，它们之间几乎没有区别。 例如，在CP分解中找到最佳的低秩近似是一个不适定的问题，并且有时可能不存在最佳的秩K（K是秩数）近似。 对于BNscheme，分解始终存在。 我们对表II中所示的两种方法进行了简单的比较。 实际的加速比和压缩率用于衡量其性能。
+
+<center>
+    <img style="border-radius: 0.3125em;
+    box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
+    src="/assets/images/图2.jpg">
+    <br>
+    <div style="color:orange; border-bottom: 1px solid #d9d9d9;
+    display: inline-block;
+    color: #999;
+    padding: 2px;"> 图.1 <sup>[10]</sup>中提出的三阶段压缩方法:剪枝，量化和huffman编码。输入是原始模型，输出是压缩后的模型。</div>
+</center>
+
+## 参考文献
+<div id="refer-anchor-1"></div>
+
+- [1] [A. Krizhevsky, I. Sutskever, and G. Hinton, “Imagenet classification withdeep convolutional neural networks,” inNIPS, 2012.](http://xueshu.baidu.com/)
+
+<div id="refer-anchor-2"></div>
+
+- [2] [K. Taigman, M. Yang, M. Ranzato, and L. Wolf, “Deepface: Closing thegap to human-level performance in face verification,” inCVPR, 2014.](https://en.wikipedia.org/wiki/Main_Page)
+
+<div id="refer-anchor-3"></div>
+
+- [3] [Y. Lu, A. Kumar, S. Zhai, Y. Cheng, T. Javidi, and R. S. Feris, “Fully-adaptive  feature  sharing  in  multi-task  networks  with  applications  inperson attribute classification,”CoRR, vol. abs/1611.05377, 2016.](https://en.wikipedia.org/wiki/Main_Page)
+
+<div id="refer-anchor-4"></div>
+
+- [4] [J.  Dean,  G.  Corrado,  R.  Monga,  K.  Chen,  M.  Devin,  Q.  Le,  M.  Mao,M.  Ranzato,  A.  Senior,  P.  Tucker,  K.  Yang,  and  A.  Ng,  “Large  scaledistributed deep networks,” inNIPS, 2012.](https://en.wikipedia.org/wiki/Main_Page)
+
+<div id="refer-anchor-5"></div>
+
+- [5] [K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for imagerecognition,”CoRR, vol. abs/1512.03385, 2015.](https://en.wikipedia.org/wiki/Main_Page)
+
+<div id="refer-anchor-6"></div>
+
+- [6] [Y. Gong, L.Liu,M.Yang,   and   L.   D.   Bourdev,   “Compressingdeep  convolutional  networks  using  vector  quantization,”CoRR,  vol.abs/1412.6115, 2014.](https://en.wikipedia.org/wiki/Main_Page)
+<div id="refer-anchor-7"></div>
+
+- [7] [Y.  W.  Q.  H.  Jiaxiang  Wu,  Cong  Leng  and  J.  Cheng,  “Quantizedconvolutional neural networks for mobile devices,” inIEEE Conferenceon Computer Vision and Pattern Recognition (CVPR), 2016.](https://en.wikipedia.org/wiki/Main_Page)
