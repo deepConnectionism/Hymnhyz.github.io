@@ -84,26 +84,16 @@ l$_{0}$或l$_{1}$正则化器中引入。文献[<sup>[26]</sup>](#refer-anchor-2
 在包含fully-connected layers的体系结构中，至关重要的是探索fully-connected  layers中的参数冗余，这通常是内存消耗方面的瓶颈。 这些网络层使用非线性变换
 $\mathcal{f}$(x,M)=$\sigma$(Mx)，其中$\sigma(\cdot)$是element-wise的非线性算子，x是输入向量，M是$\mathcal{m\times n}$的参数矩阵[<sup>[30]</sup>](#refer-anchor-30)。当M是一个大的一般稠密矩阵时，存储$\mathcal{mn}$参数和计算矩阵向量乘积的花费在$\mathcal{O(mn)}$时间内。因此，修剪参数的直观方法是将迫使x为参数化的结构矩阵。一个$\mathcal{mn}$矩阵可以使用比称为结构化矩阵的参数少得多的参数来描述。通常，该结构不仅应减少存储成本，还应通过快速的矩阵向量乘法和梯度计算显著地加快推理和训练阶段。
 遵循这个方向，[<sup>[31]</sup>](#refer-anchor-31)，[<sup>[32]</sup>](#refer-anchor-32)中的工作提出了一种基于循环预测(circulant projections)的简单有效的方法，同时保持了竞争性错误率。给定一个向量$\mathcal{r=(r_{0},r_{1},\cdots,r_{d-1})}$，循环矩阵$\mathcal{\Bbb R\in\Bbb R^{d\times d}}$定义为：
-
   $$
   \begin{pmatrix}
-
   r_0&r_{d-1}&\cdots&r_2&r_1\\
-
-  r_1&r_0&r_{d-1}&    &r_2\\
-
+  r_1&r_0&r_{d-1}&&r_2\\
   \vdots&r_1&r_0&\ddots&\vdots\\
-
   r_{d-2}&&\ddots&\ddots&r_{d-1}\\
-
-  r_{d-1}&r_{d-2}&\cdots&r_1&r_0\\ 
-
+  r_{d-1}&r_{d-2}&\cdots&r_1&r_0\\    
   \end{pmatrix}
-
   \tag{1}
-  
   $$
-
 因此内存成本变为$\mathcal{O(d)}$而不是$\mathcal{O(d^2)}$。这样的循环结构还可以使用快速傅里叶变换（FFT）来加快计算速度。给定一个d-维向量**r**，上述等式(1)中的1层循环神经网络具有$\mathcal{O(dlogd)}$的时间复杂度。
 
 在[<sup>[33]</sup>](#refer-anchor-33)中，引入了一种新的自适应快餐变换(Adaptive Fastfood transform)来重新参数化fully connected layers的矩阵向量乘法。定义了Adaptive Fastfood transform matrix $\mathcal{\Bbb R\in \Bbb R^{n\times d}}$为：
