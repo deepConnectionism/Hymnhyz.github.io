@@ -102,7 +102,7 @@ Prediction: 3
 注：cudnn版本为8.1.1，去[下载](https://developer.nvidia.com/compute/machine-learning/cudnn/secure/8.1.1.33/10.2_20210301/cudnn-10.2-linux-x64-v8.1.1.33.tgz)
 
     tar -xvf  ./cudnn-10.2-linux-x64-v8.1.1.33.tgz 
-    sudo cp cuda/include/cudnn.h /usr/local/cuda/include/          
+    sudo cp cuda/include/cudnn*.h /usr/local/cuda/include/          
     sudo cp cuda/lib64/libcudnn* /usr/local/cuda/lib64/ 
-    sudo chmod a+r /usr/local/cuda/include/cudnn.h 
+    sudo chmod a+r /usr/local/cuda/include/cudnn*.h 
     sudo chmod a+r /usr/local/cuda/lib64/libcudnn* 
